@@ -10,6 +10,8 @@ import 'package:loading/indicator/ball_pulse_indicator.dart';
 import 'package:loading/loading.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:nice_button/nice_button.dart';
+
 
 
 
@@ -32,37 +34,106 @@ class MyApp extends StatelessWidget {// This widget is the root of your applicat
         // is not restarted.
         primarySwatch: Colors.red,
       ),
-      home: loadingScreen(title: 'Emegency Ron'),
+      home: StartPage(title: 'Emegency Ron'),
     );
   }
 }
 
 var images = [Image.asset('assets/images/Face.png')];
 var quotes = [];
+var packs = new List<PopupMenuEntry>();
+var packsLocation = [];
 
 class loadingScreenState extends State<loadingScreen> {
   var httpClient = new HttpClient();
 
   //downloads file
-  Future<File> _downloadFile(String url, String name) async {
+  _downloadFile(String url, String name) async {
     print("starting download");
     String filename = name + '.zip';
     var request = await httpClient.getUrl(Uri.parse(url));
+    print("request");
     var response = await request.close();
+    print("response");
     var bytes = await consolidateHttpClientResponseBytes(response);
+    print("bytes"); // takes a very long time ~ 1 min
     String dir = (await getApplicationDocumentsDirectory()).path;
-    File file = new File('$dir/$filename');
-    await file.writeAsBytes(bytes);
+//    File file = new File('$dir/$filename');
+//    await file.writeAsBytes(bytes);
     Map<String, dynamic> packInfo = await unzip(bytes, name);
     packInfo['packPath'] = dir + "/" + name;
     await loadFaces(packInfo);
     await loadQuotes(packInfo);
+    await updateList(packInfo);
     print("pushing context");
+    await addBoolToSF(true);
+    await loadList();
     Navigator.push(
       context,
-      new MaterialPageRoute(builder: (context) => new MyHomePage(title: 'Emegency Ron')),
+      new MaterialPageRoute(builder: (context) => new MyHomePage(title: packInfo['name'])),
     );
-    return file;
+  }
+
+  loadAll() async {
+    final directory = await getApplicationDocumentsDirectory();
+    String packPath = directory.path + "/" + widget.title + '/';
+    Map<String, dynamic> packInfo = json.decode(await File(packPath + 'packInfo.json').readAsString());
+    packInfo['packPath'] = directory.path + "/" + widget.title;
+    await loadFaces(packInfo);
+    await loadQuotes(packInfo);
+    loadList();
+    Navigator.push(
+      context,
+      new MaterialPageRoute(builder: (context) => new MyHomePage(title: packInfo['name'])),
+    );
+  }
+  
+  void updateList(Map<String, dynamic> packInfo) async{
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    var list = prefs.getStringList("list");
+    var newList = new List<String>();
+    
+    if(list != null){
+      for(int i = 0; i <list.length; i++){
+        newList.add(list[i]);
+      }
+    }
+    newList.add(packInfo['name']);
+    prefs.setStringList("list", newList);
+  }
+
+  void loadList() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    var list = prefs.getStringList("list");
+
+    if(list != null) {
+      packs.clear();
+      packsLocation.clear();
+      for(int i = 0; i < list.length; i++){
+        packsLocation.add(list[i]);
+        packs.add(
+          new PopupMenuItem(
+            value: i,
+            child: Row(
+              children: <Widget>[
+                Text(list[i], style: TextStyle(fontWeight: FontWeight.bold),),
+              ],
+            )
+        ),
+        );
+      }
+    }
+
+    packs.add(PopupMenuItem(
+        value: 10000000,
+        child: Row(
+          children: <Widget>[
+            Icon(Icons.arrow_back, color: Colors.black, size: 20,),
+            Text("Return", style: TextStyle(fontWeight: FontWeight.bold),),
+          ],
+        )
+    )
+    );
   }
 
   void loadFaces(Map<String, dynamic> packInfo) async {
@@ -99,14 +170,43 @@ class loadingScreenState extends State<loadingScreen> {
           ..create(recursive: true);
       }
     }
-
     return json.decode(await File(packPath + 'packInfo.json').readAsString());
   }
 
+  Future<bool> getBoolValuesSF() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    //Return bool
+    print('isPackDownloaded ' + widget.title);
+    bool boolValue = prefs.getBool('isPackDownloaded ' + widget.title);
+    return boolValue;
+  }
+
+  addBoolToSF(bool isPackDownloaded) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    print("adding "+ isPackDownloaded.toString() + "to");
+    print('isPackDownloaded ' + widget.title);
+    prefs.setBool('isPackDownloaded ' + widget.title, isPackDownloaded);
+  }
+
+  bool isDone = false;
+
   @override
-  void initState (){
+  void initState () {
     super.initState();
-    _downloadFile("https://guid-bucket.s3.us-east-2.amazonaws.com/ron.zip", "ron");
+    Future<bool> future = Future.delayed(
+      Duration(seconds: 1),
+          () => getBoolValuesSF(),
+    );
+
+    future.then((future) {
+      print(future.toString());
+      if (future == null) {
+        _downloadFile("https://guid-bucket.s3.us-east-2.amazonaws.com/" + widget.title +".zip", widget.title);
+      }
+      else {
+        loadAll();
+      }
+    });
   }
 
   @override
@@ -138,7 +238,7 @@ class loadingScreen extends StatefulWidget {
 }
 
 class StartPageState extends State<StartPage> {
-  getStringValuesSF() async {
+  Future<String> getStringValuesSF() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     //Return String
     String stringValue = prefs.getString('guid');
@@ -147,15 +247,27 @@ class StartPageState extends State<StartPage> {
   @override
   void initState (){
     super.initState();
-//    String guid = getStringValuesSF();
-//    if(guid.isEmpty) {
-//      //push to create
-//      //TODO
-//    }
-//    else {
-//      //push to load screen with correct guid val
-//      //TODO
-//    }
+    Future<String> future = Future.delayed(
+      Duration(seconds: 2),
+          () => getStringValuesSF(),
+    );
+
+    future.then((future) {
+      if(future == null) {
+        Navigator.push(
+          context,
+          new MaterialPageRoute(builder: (context) => new CreatePage(title: 'Emegency Ron')),
+        );
+        //push to create
+        //TODO
+      }
+      else {
+        Navigator.push(
+          context,
+          new MaterialPageRoute(builder: (context) => new loadingScreen(title: future)),
+        );
+      }
+    });
   }
 
   Widget build (BuildContext context) {
@@ -193,6 +305,137 @@ class StartPage extends StatefulWidget {
 
   @override
   StartPageState createState() => StartPageState();
+}
+
+
+class CreatePageState extends State<CreatePage> {
+  getStringValuesSF() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    //Return String
+    String stringValue = prefs.getString('guid');
+    return stringValue;
+  }
+
+  String name = "";
+
+  addStringToSF(guid) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    prefs.setString('guid', guid);
+  }
+
+  Widget build (BuildContext context) {
+    return new Scaffold(
+        body: Container(
+            color: Colors.white,
+            child: Center(
+                child: ListView(
+                  children: <Widget>[
+                    Padding(
+                      padding: EdgeInsets.only(
+                        top: 100
+                      ),
+                    ),
+                    Row(
+                      children: <Widget>[
+                        Text(
+                          "L",
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 80,
+                              color: Colors.redAccent
+                          ),
+                        ),
+                        Icon(
+                            Icons.favorite,
+                            color: Colors.pink,
+                            size: 80
+                        ),
+                        Text(
+                          "VE",
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 80,
+                              color: Colors.redAccent
+                          ),
+                        ),
+                      ],
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                    ),
+                    Text(
+                      "PARROT",
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 80,
+                          color: Colors.redAccent
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(
+                        left: 30,
+                        right: 30,
+                      ),
+                      child: TextField(
+                        decoration: InputDecoration(
+                          border: OutlineInputBorder(),
+                          labelText: 'Input Key',
+                        ),
+                        expands: false,
+                        onChanged: (val) {
+                          name = val;
+                        },
+                        cursorColor: Colors.red,
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(5),
+                      child: NiceButton(
+                        radius: 40,
+                        padding: const EdgeInsets.all(15),
+                        text: "Use Existing\t \t",
+                        icon: Icons.assignment_turned_in,
+                        gradientColors: [Colors.red[200], Colors.red[800]],
+                        elevation: 5,
+                        onPressed: () {
+                          addStringToSF(name);
+                          Navigator.push(
+                            context,
+                            new MaterialPageRoute(builder: (context) => new loadingScreen(title: name)),
+                          );
+                        },
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 5),
+                      child: NiceButton(
+                        radius: 40,
+                        padding: const EdgeInsets.all(15),
+                        text: "Create New\t \t",
+                        icon: Icons.create,
+                        gradientColors: [Colors.red[200], Colors.red[800]],
+                        elevation: 5,
+                        onPressed: () {
+
+                        },
+                      ),
+                    ),                  ],
+//                  crossAxisAlignment: CrossAxisAlignment.center,
+//                  mainAxisAlignment: MainAxisAlignment.center,
+                )
+            )
+        )
+    );
+  }
+}
+
+class CreatePage extends StatefulWidget {
+  CreatePage({Key key, this.title}) : super(key: key);
+
+  final String title;
+
+  @override
+  CreatePageState createState() => CreatePageState();
 }
 
 class Quote {
@@ -267,7 +510,7 @@ class _MyHomePageState extends State<MyHomePage> {
                 style: TextStyle(
                     color: Colors.grey[800],
                     fontStyle: FontStyle.italic,
-                    fontSize: 16
+                    fontSize: 16,
                 ),
               ),
             ],
@@ -281,9 +524,27 @@ class _MyHomePageState extends State<MyHomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        leading: new PopupMenuButton(
+          icon: Icon(Icons.menu),
+          offset: Offset(0, 30),
+          itemBuilder: (context) => packs,
+          onSelected: (value) {
+            if(value == 10000000){
+              Navigator.push(
+                context,
+                new MaterialPageRoute(builder: (context) => new CreatePage(title: 'Emegency Ron')),
+              );
+            } else {
+              Navigator.push(
+                context,
+                new MaterialPageRoute(builder: (context) => new loadingScreen(title: packsLocation[value])),
+              );
+            }
+          },
+        ),
         title: Text(widget.title),
       ),
-      body: mainWidget()
+      body: mainWidget(),
     );
   }
 }
